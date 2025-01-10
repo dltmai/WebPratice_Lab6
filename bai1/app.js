@@ -60,11 +60,15 @@ app.post("/register", async (req, res) => {
 
 app.post("/login", async (req, res) => {
   const { username, password } = req.body;
+  const loginAddress = req.ip; // Get user's IP address
+  const loginTime = new Date(); // Get current time
+
   if (!username || !password) {
     return res
       .status(400)
       .json({ message: "Username and password are required" });
   }
+
   try {
     const users = await query("SELECT * FROM users WHERE username = ?", [
       username,
@@ -78,12 +82,28 @@ app.post("/login", async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
-    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "1h" });
-    await query("INSERT INTO tokens (user_id, token) VALUES (?, ?)", [
-      user.id,
+
+    // Include additional information in JWT
+    const tokenPayload = {
+      id: user.id,
+      username: user.username,
+      loginTime,
+      loginAddress,
+    };
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "1h" });
+
+    // Save token and additional info to database
+    await query(
+      "INSERT INTO tokens (user_id, token, login_time, login_address) VALUES (?, ?, ?, ?)",
+      [user.id, token, loginTime, loginAddress]
+    );
+
+    res.status(200).json({
+      message: "Login successful",
       token,
-    ]);
-    res.status(200).json({ message: "Login successful", token });
+      loginTime,
+      loginAddress,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Error logging in" });
@@ -95,9 +115,13 @@ app.get("/verify", async (req, res) => {
   if (!token) {
     return res.status(400).json({ message: "Token is required" });
   }
+
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    res.status(200).json({ message: "Token is valid", decoded });
+    res.status(200).json({
+      message: "Token is valid",
+      decoded,
+    });
   } catch (err) {
     res.status(401).json({ message: "Invalid or expired token" });
   }
